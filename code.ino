@@ -1,3 +1,4 @@
+#include "HX711.h"
 #include <OneWire.h>
 #include "MAX30105.h"
 #include "heartRate.h"
@@ -23,7 +24,18 @@ long irValue;
 int DataisReady = 0;
 float temperatureC;
 
-enum State{
+#define DOUT 32
+#define CLK 33
+
+// Create an instance of the HX711 class
+HX711 scale;
+
+float calibration_factor = 100;  // Set your calibration factor
+float units;
+float ounces;
+
+int Buzzer = 19;
+enum State {
   IDLE,
   MEASURE_TEMPERATURE,
   MEASURE_HEART_RATE
@@ -43,6 +55,15 @@ void setup() {
   sensors.begin();
   SerialBT.begin("PATIENT MONITORING");
 
+  pinMode(Buzzer, OUTPUT);
+
+  digitalWrite(Buzzer, LOW);
+
+  scale.begin(DOUT, CLK);  // Initialize with data and clock pins
+  scale.set_scale(calibration_factor);
+  scale.tare();  // Reset the scale to 0
+  Serial.println("Readings:");
+
   if (!particleSensor.begin(Wire, I2C_SPEED_FAST)) {
     Serial.println("MAX30102 was not found. Please check wiring/power. ");
     while (1)
@@ -56,7 +77,8 @@ void setup() {
 }
 
 void loop() {
-  switch (currentState){
+  //measureWeight();
+  switch (currentState) {
     case IDLE:
       idle();
       break;
@@ -68,7 +90,7 @@ void loop() {
       break;
   }
 }
-void idle(){
+void idle() {
   checkFingerDetection();
 }
 void checkFingerDetection() {
@@ -79,18 +101,24 @@ void checkFingerDetection() {
     measurementStartTime = millis();
   }
 }
-void measure_Temperature(){
-  sensors.requestTemperatures();                    // Request temperature reading
+void measure_Temperature() {
+  sensors.requestTemperatures();              // Request temperature reading
   temperatureC = sensors.getTempCByIndex(0);  // Get temperature in Celsius
 
   // Serial.print("Temperature: ");
   // Serial.print(temperatureC);
   // Serial.println(" °C");
-  SerialBT.print(temperatureC, 1);
-  SerialBT.println(" °C                    Loading");
-  delay(1000);
+  measureWeight();
+  if (units > 150) {
+    SerialBT.print(temperatureC, 1);
+    SerialBT.println(" °C                    Loading");
+    delay(1000);
+  }else{
+    digitalWrite(Buzzer, LOW);
+    SerialBT.println("NO PATIENT ON BED");
+  }
 
-   if (millis() - measurementStartTime >= 10000) {
+  if (millis() - measurementStartTime >= 10000) {
     Serial.println("Done Measuring");
     currentState = MEASURE_HEART_RATE;
   }
@@ -125,15 +153,34 @@ void measureBP() {
     // Serial.print(beatsPerMinute);
     // Serial.print(", Avg BPM=");
     // Serial.print(beatAvg);
-    SerialBT.print(temperatureC, 1);
-    SerialBT.print(" °C");
-    SerialBT.print("                    ");
-    SerialBT.print(beatAvg);
-    SerialBT.println(" BPM");
-    delay(10000);
-    SerialBT.println("DONE MEASURING");
-    delay(5000);
-    SerialBT.println("NEXT PATIENT");
+    measureWeight();
+    if (units > 150) {
+      SerialBT.print(temperatureC, 1);
+      SerialBT.print(" °C");
+      SerialBT.print("                    ");
+      SerialBT.print(beatAvg);
+      SerialBT.println(" BPM");
+      delay(10000);
+      digitalWrite(Buzzer, HIGH);
+      SerialBT.println("DONE MEASURING");
+      delay(5000);
+      SerialBT.println("NEXT PATIENT");
+      digitalWrite(Buzzer, LOW);
+    }else{
+      digitalWrite(Buzzer, LOW);
+      SerialBT.println("NO PATIENT ON BED");
+    }
     currentState = IDLE;
   }
+}
+void measureWeight() {
+  Serial.print("Reading: ");
+  units = scale.get_units(10);  // Get average of 10 readings
+  if (units < 0) {
+    units = 0.00;  // Ensure we don't show negative values
+  }
+  ounces = units * 0.035274;  // Convert grams to ounces
+  Serial.print(units);
+  Serial.println(" grams");
+  delay(1000);
 }
